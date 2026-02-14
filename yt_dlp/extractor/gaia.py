@@ -13,37 +13,42 @@ from ..utils import (
 
 class GaiaIE(InfoExtractor):
     _VALID_URL = r'https?://(?:www\.)?gaia\.com/video/(?P<id>[^/?]+).*?\bfullplayer=(?P<type>feature|preview)'
-    _TESTS = [{
-        'url': 'https://www.gaia.com/video/connecting-universal-consciousness?fullplayer=feature',
-        'info_dict': {
-            'id': '89356',
-            'ext': 'mp4',
-            'title': 'Connecting with Universal Consciousness',
-            'description': 'md5:844e209ad31b7d31345f5ed689e3df6f',
-            'upload_date': '20151116',
-            'timestamp': 1447707266,
-            'duration': 936,
+    _TESTS = [
+        {
+            'url': 'https://www.gaia.com/video/connecting-universal-consciousness?fullplayer=feature',
+            'info_dict': {
+                'id': '89356',
+                'ext': 'mp4',
+                'title': 'Connecting with Universal Consciousness',
+                'description': 'md5:844e209ad31b7d31345f5ed689e3df6f',
+                'thumbnail': 'https://brooklyn.gaia.com/v1/assets-render/5bbe0c06-be65-4e54-a4ff-2ed79c4a822b?hash=c5309a93e9a10f0e6fac0e3003892d672eca39d63d823a5121f2d39cbdb665f4',
+                'upload_date': '20151116',
+                'timestamp': 1447707266,
+                'duration': 936,
+            },
+            'params': {
+                # m3u8 download
+                'skip_download': True,
+            },
         },
-        'params': {
-            # m3u8 download
-            'skip_download': True,
+        {
+            'url': 'https://www.gaia.com/video/connecting-universal-consciousness?fullplayer=preview',
+            'info_dict': {
+                'id': '89351',
+                'ext': 'mp4',
+                'title': 'Connecting with Universal Consciousness',
+                'description': 'md5:844e209ad31b7d31345f5ed689e3df6f',
+                'thumbnail': 'https://brooklyn.gaia.com/v1/assets-render/5bbe0c06-be65-4e54-a4ff-2ed79c4a822b?hash=c5309a93e9a10f0e6fac0e3003892d672eca39d63d823a5121f2d39cbdb665f4',
+                'upload_date': '20151116',
+                'timestamp': 1447707266,
+                'duration': 53,
+            },
+            'params': {
+                # m3u8 download
+                'skip_download': True,
+            },
         },
-    }, {
-        'url': 'https://www.gaia.com/video/connecting-universal-consciousness?fullplayer=preview',
-        'info_dict': {
-            'id': '89351',
-            'ext': 'mp4',
-            'title': 'Connecting with Universal Consciousness',
-            'description': 'md5:844e209ad31b7d31345f5ed689e3df6f',
-            'upload_date': '20151116',
-            'timestamp': 1447707266,
-            'duration': 53,
-        },
-        'params': {
-            # m3u8 download
-            'skip_download': True,
-        },
-    }]
+    ]
     _NETRC_MACHINE = 'gaia'
     _jwt = None
 
@@ -58,22 +63,36 @@ class GaiaIE(InfoExtractor):
             return
         auth = self._download_json(
             'https://auth.gaia.com/v1/login',
-            None, data=urlencode_postdata({
-                'username': username,
-                'password': password,
-            }))
+            None,
+            data=urlencode_postdata(
+                {
+                    'username': username,
+                    'password': password,
+                },
+            ),
+        )
         if auth.get('success') is False:
             raise ExtractorError(', '.join(auth['messages']), expected=True)
         self._jwt = auth.get('jwt')
 
     def _real_extract(self, url):
         display_id, vtype = self._match_valid_url(url).groups()
+        webpage = self._download_webpage(url, display_id)
+        thumbnail = self._search_regex(
+            r'(?s)<video\b[^>]*>.*?<picture\b[^>]*\bsrc=(?:"|\')(?P<thumbnail>.+?)(?:"|\')',
+            webpage,
+            'thumbnail',
+            group='thumbnail',
+            fatal=False,
+        )
         node_id = self._download_json(
-            'https://brooklyn.gaia.com/pathinfo', display_id, query={
+            'https://brooklyn.gaia.com/pathinfo',
+            display_id,
+            query={
                 'path': 'video/' + display_id,
-            })['id']
-        node = self._download_json(
-            'https://brooklyn.gaia.com/node/%d' % node_id, node_id)
+            },
+        )['id']
+        node = self._download_json('https://brooklyn.gaia.com/node/%d' % node_id, node_id)
         vdata = node[vtype]
         media_id = str(vdata['nid'])
         title = node['title']
@@ -81,19 +100,18 @@ class GaiaIE(InfoExtractor):
         headers = None
         if self._jwt:
             headers = {'Authorization': 'Bearer ' + self._jwt}
-        media = self._download_json(
-            'https://brooklyn.gaia.com/media/' + media_id,
-            media_id, headers=headers)
-        formats = self._extract_m3u8_formats(
-            media['mediaUrls']['bcHLS'], media_id, 'mp4')
+        media = self._download_json('https://brooklyn.gaia.com/media/' + media_id, media_id, headers=headers)
+        formats = self._extract_m3u8_formats(media['mediaUrls']['bcHLS'], media_id, 'mp4')
 
         subtitles = {}
         text_tracks = media.get('textTracks', {})
         for key in ('captions', 'subtitles'):
             for lang, sub_url in text_tracks.get(key, {}).items():
-                subtitles.setdefault(lang, []).append({
-                    'url': sub_url,
-                })
+                subtitles.setdefault(lang, []).append(
+                    {
+                        'url': sub_url,
+                    },
+                )
 
         fivestar = node.get('fivestar', {})
         fields = node.get('fields', {})
@@ -106,6 +124,7 @@ class GaiaIE(InfoExtractor):
             'display_id': display_id,
             'title': title,
             'formats': formats,
+            'thumbnail': thumbnail,
             'description': strip_or_none(get_field_value('body') or get_field_value('teaser')),
             'timestamp': int_or_none(node.get('created')),
             'subtitles': subtitles,
